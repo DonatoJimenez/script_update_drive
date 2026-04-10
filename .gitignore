@@ -1,0 +1,17 @@
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+#credencials
+API_key
+dist
+build
+dist.zip
+config.json
+credenciales.json
+SincronizadorBase.spec
