@@ -228,6 +228,109 @@ def aplicar_bordes(spreadsheet, sheet_id, start_row, num_filas, num_cols):
         }]
     }))
 
+def extraer_clave_orden(id_str):
+    """
+    Convierte un ID (string) en una tupla (numero, sufijo) para ordenamiento natural.
+    Ejemplos:
+        "1029"    -> (1029, "")
+        "1029-A"  -> (1029, "-A")
+        "1029."   -> (1029, ".")
+        "ABC123"  -> (9999999, "ABC123")  # Si no empieza con número, va al final
+    """
+    s = str(id_str).strip()
+    if not s:
+        return (float('inf'), '')
+    # Buscar prefijo numérico al inicio
+    match = re.match(r'^(\d+)(.*)$', s)
+    if match:
+        num = int(match.group(1))
+        sufijo = match.group(2)
+        return (num, sufijo)
+    else:
+        # No empieza con dígito -> mandar al final con número muy alto
+        return (float('inf'), s)
+
+def ordenar_y_reescribir_hoja(spreadsheet, worksheet, col_index=0):
+    """
+    Lee todos los datos de la hoja, los ordena según la columna ID (usando orden natural),
+    y los vuelca de nuevo a la hoja, manteniendo cabecera fija.
+    """
+    print("📥 Leyendo datos para ordenamiento personalizado...")
+    all_data = con_reintentos(lambda: worksheet.get_all_values())
+    if len(all_data) <= 1:
+        print("ℹ️  No hay suficientes datos para ordenar.")
+        return
+
+    cabecera = all_data[0]
+    filas = all_data[1:]
+
+    # Ordenar filas según la columna ID
+    try:
+        filas_ordenadas = sorted(
+            filas,
+            key=lambda fila: extraer_clave_orden(fila[col_index] if col_index < len(fila) else '')
+        )
+    except Exception as e:
+        print(f"⚠️  Error al ordenar: {e}")
+        return
+
+    print("🧹 Limpiando hoja y escribiendo datos ordenados...")
+    # Borrar contenido desde fila 2 hasta el final
+    if len(filas) > 0:
+        num_columnas = len(cabecera)
+        rango_limpiar = f"A2:{gspread.utils.rowcol_to_a1(len(all_data), num_columnas)}"
+        con_reintentos(lambda: worksheet.batch_clear([rango_limpiar]))
+
+    # Escribir filas ordenadas
+    if filas_ordenadas:
+        con_reintentos(lambda: worksheet.update(
+            f"A2:{gspread.utils.rowcol_to_a1(len(filas_ordenadas)+1, len(cabecera))}",
+            filas_ordenadas,
+            value_input_option='USER_ENTERED'
+        ))
+
+    print("✅ Datos ordenados y escritos correctamente.")
+
+def aplicar_bordes_a_todo(spreadsheet, worksheet):
+    """
+    Aplica bordes a todas las celdas con datos (cabecera + filas de datos).
+    """
+    all_values = con_reintentos(lambda: worksheet.get_all_values())
+    num_filas = len(all_values)
+    if num_filas == 0:
+        return
+    num_columnas = len(all_values[0]) if num_filas > 0 else 0
+    if num_columnas == 0:
+        return
+
+    sheet_id = worksheet.id
+    borde = {
+        "style": "SOLID",
+        "width": 1,
+        "color": {"red": 0, "green": 0, "blue": 0}
+    }
+
+    con_reintentos(lambda: spreadsheet.batch_update({
+        "requests": [{
+            "updateBorders": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": 0,
+                    "endRowIndex": num_filas,
+                    "startColumnIndex": 0,
+                    "endColumnIndex": num_columnas
+                },
+                "top": borde,
+                "bottom": borde,
+                "left": borde,
+                "right": borde,
+                "innerHorizontal": borde,
+                "innerVertical": borde
+            }
+        }]
+    }))
+    print(f"🖊️  Bordes aplicados a todo el rango ({num_filas} filas x {num_columnas} columnas).")
+
 print("🔌 Conectando con Google Sheets...")
 spreadsheet = con_reintentos(lambda: client.open_by_key(spreadsheet_id))
 worksheet = con_reintentos(lambda: spreadsheet.worksheet(worksheet_name))
@@ -312,7 +415,6 @@ if keys_existentes and not df_remoto.empty:
             if not valores_iguales(l_val, r_val):
                 diferente = True
                 
-                
         if diferente:
             row_num = fila_por_id.get(key)
             if row_num:
@@ -363,5 +465,11 @@ else:
     sheet_id = worksheet.id
     num_cols = len(filas[0]) if filas else 0
     aplicar_bordes(spreadsheet, sheet_id, filas_remotas_actuales, len(filas), num_cols)
+    filas_remotas_actuales += len(filas)  # Actualizar total de filas
+
+
+print("🔃 Organizando hoja por ID con orden natural...")
+ordenar_y_reescribir_hoja(spreadsheet, worksheet, col_index=ID_COL_INDEX)
+aplicar_bordes_a_todo(spreadsheet, worksheet)
 
 print("✅ Proceso completado.")
